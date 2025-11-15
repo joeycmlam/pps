@@ -243,18 +243,113 @@ class PPSWorkflow:
 
 def main():
     """Main entry point for workflow execution"""
-    # Initialize workflow
-    workflow = PPSWorkflow(
-        requirements_file='/Users/joeylam/repo/pps/requirements/user_requirement.md',
-        analysis_dir='/Users/joeylam/repo/pps/requirements/analysis',
-        architecture_dir='/Users/joeylam/repo/pps/architecture'
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description='Personal Portfolio System AI Workflow',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run full BA → Architect workflow (default)
+  python ai_workflow_orchestrated.py
+  
+  # Run only BA Agent
+  python ai_workflow_orchestrated.py --steps ba
+  
+  # Run only Architect Agent (requires existing BA analysis)
+  python ai_workflow_orchestrated.py --steps architect
+  
+  # Run with step-by-step confirmation
+  python ai_workflow_orchestrated.py --steps ba architect --pause
+  
+  # Custom requirements file
+  python ai_workflow_orchestrated.py --requirements requirements/custom.md
+  
+  # Custom output directories
+  python ai_workflow_orchestrated.py --analysis-dir output/analysis --arch-dir output/architecture
+  
+  # Use different LLM
+  python ai_workflow_orchestrated.py --llm-provider ollama --llm-model llama3.2
+        """
     )
     
-    # Run workflow (BA → Architect)
-    workflow.run(
-        steps=['ba', 'architect'],
-        pause_between_steps=False
+    parser.add_argument(
+        '--requirements',
+        default='/Users/joeylam/repo/pps/requirements/user_requirement.md',
+        help='Path to requirements file (default: requirements/user_requirement.md)'
     )
+    
+    parser.add_argument(
+        '--analysis-dir',
+        default='/Users/joeylam/repo/pps/requirements/analysis',
+        help='Output directory for BA Agent analysis (default: requirements/analysis)'
+    )
+    
+    parser.add_argument(
+        '--arch-dir',
+        default='/Users/joeylam/repo/pps/architecture',
+        help='Output directory for architecture design (default: architecture)'
+    )
+    
+    parser.add_argument(
+        '--steps',
+        nargs='+',
+        choices=['ba', 'architect', 'qa', 'senior_dev', 'developer'],
+        default=['ba', 'architect'],
+        help='Workflow steps to execute (default: ba architect)'
+    )
+    
+    parser.add_argument(
+        '--pause',
+        action='store_true',
+        help='Pause between steps for review'
+    )
+    
+    parser.add_argument(
+        '--project-name',
+        default='Personal Portfolio System',
+        help='Project name for display (default: Personal Portfolio System)'
+    )
+    
+    parser.add_argument(
+        '--llm-provider',
+        default='github_copilot_cli',
+        choices=['github_copilot_cli', 'ollama'],
+        help='LLM provider (default: github_copilot_cli)'
+    )
+    
+    parser.add_argument(
+        '--llm-model',
+        default='gpt-4o',
+        help='LLM model name (default: gpt-4o)'
+    )
+    
+    args = parser.parse_args()
+    
+    # Initialize workflow with parsed arguments
+    workflow = PPSWorkflow(
+        requirements_file=args.requirements,
+        analysis_dir=args.analysis_dir,
+        architecture_dir=args.arch_dir,
+        llm_provider=args.llm_provider,
+        llm_model=args.llm_model
+    )
+    
+    # Run workflow with specified steps
+    try:
+        workflow.run(
+            steps=args.steps,
+            pause_between_steps=args.pause,
+            project_name=args.project_name
+        )
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Workflow interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"\n\n❌ Workflow failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == '__main__':
