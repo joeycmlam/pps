@@ -1,0 +1,28 @@
+# Environment and secrets
+.env
+*.env
+.env.local
+
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# IDE
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Data and logs
+memory.json
+*.log
+monitoring/
+
+# OS
+.DS_Store
+Thumbs.db
