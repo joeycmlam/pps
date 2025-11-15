@@ -1,191 +1,159 @@
 #!/usr/bin/env python3
 """
-AI Workflow - Orchestrated Requirements Analysis & System Design
-
-Uses Lead Orchestrator to manage flexible workflow execution.
+Orchestrated AI Workflow for PPS Project
+Demonstrates BA Agent → Architect Agent integration with context passing
 """
 
 import os
 import sys
+from pathlib import Path
 
-# Add aiteam to Python path
-aiteam_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'aiteam')
+# Add aiteam directory to path
+aiteam_path = '/Users/joeylam/repo/aiteam'
 sys.path.insert(0, aiteam_path)
 
 from agents.lead_orchestrator import LeadOrchestrator
 from agents.ba_agent import BAAgent
 from agents.architect_agent import ArchitectAgent
-from dotenv import load_dotenv
 
-def create_ba_handler(llm_config, jira_config, requirements_file):
-    """Handler for BA Agent step"""
-    def handler(context):
-        print("📋 Running BA Agent...")
-        ba = BAAgent(llm_config, jira_config)
-        req_data = ba.read_requirement_file(requirements_file)
-        
-        if 'error' in req_data:
-            return {'status': 'error', 'message': req_data['error']}
-        
-        result = ba.analyze_requirements(req_data, output_dir='requirements/analysis')
-        return {
-            'status': 'success',
-            'user_stories': len(result.get('user_stories', [])),
-            'assumptions': len(result.get('assumptions', []))
-        }
-    return handler
-
-def create_architect_handler(llm_config, codebase_path):
-    """Handler for Architect Agent step"""
-    def handler(context):
-        print("🏗️  Running Architect Agent...")
-        architect = ArchitectAgent(llm_config)
-        
-        if os.path.exists(codebase_path):
-            analysis = architect.analyze_codebase(codebase_path)
-        else:
-            print(f"   ℹ️  Codebase '{codebase_path}' not found - designing new system")
-            analysis = {'total_files': 0, 'languages': {}, 'complexity': 'new'}
-        
-        patterns = architect.recommend_patterns(analysis)
-        return {
-            'status': 'success',
-            'patterns_count': len(patterns),
-            'patterns': patterns
-        }
-    return handler
-
-def main(requirements_file='requirements/user_requirement.md', 
-         codebase_path='src',
-         steps=None,
-         step_by_step=False):
-    """Orchestrated workflow with flexible step selection
+def main():
+    """Run orchestrated workflow: BA Analysis → Architecture Design"""
     
-    Args:
-        requirements_file: Path to requirements file
-        codebase_path: Path to codebase for analysis
-        steps: List of steps to run (e.g., ['ba'] or ['ba', 'architect'])
-               If None, runs ['ba', 'architect']
-        step_by_step: If True, pauses between steps for review
-    """
+    print("="*80)
+    print("🎯 Personal Portfolio System - Orchestrated AI Workflow")
+    print("="*80)
+    print("\nWorkflow Steps:")
+    print("  1. BA Agent: Analyze requirements")
+    print("  2. Architect Agent: Design system architecture")
+    print("="*80)
     
-    # Load config from aiteam
-    load_dotenv(os.path.join(aiteam_path, '.env'), override=True)
-    
+    # Configuration
     llm_config = {
         'provider': os.getenv('LLM_PROVIDER', 'github_copilot_cli'),
-        'model': os.getenv('GITHUB_MODEL', 'gpt-4o')
+        'model': os.getenv('GITHUB_MODEL', 'gpt-4o'),
+        'temperature': 0.7
     }
-    
-    jira_config = {
-        'server': os.getenv('JIRA_SERVER', 'https://example.atlassian.net'),
-        'user': os.getenv('JIRA_USER', 'user@example.com'),
-        'token': os.getenv('JIRA_API_TOKEN', 'token')
-    }
-    
-    # Default to BA + Architect if no steps specified
-    if steps is None:
-        steps = ['ba', 'architect']
-    
-    print(f"🚀 AI Workflow: {' → '.join([s.upper() for s in steps])}\n")
     
     # Initialize orchestrator
-    orchestrator = LeadOrchestrator(llm_config, jira_config)
+    orchestrator = LeadOrchestrator(llm_config)
     
-    # Register step handlers
-    if 'ba' in steps:
-        orchestrator.register_step_handler('ba', create_ba_handler(llm_config, jira_config, requirements_file))
+    # Define project paths
+    requirements_file = '/Users/joeylam/repo/pps/requirements/user_requirement.md'
+    analysis_dir = '/Users/joeylam/repo/pps/requirements/analysis'
+    architecture_dir = '/Users/joeylam/repo/pps/architecture'
     
-    if 'architect' in steps:
-        orchestrator.register_step_handler('architect', create_architect_handler(llm_config, codebase_path))
+    # Create directories
+    Path(analysis_dir).mkdir(parents=True, exist_ok=True)
+    Path(architecture_dir).mkdir(parents=True, exist_ok=True)
     
-    # Create and execute workflow
+    # Register BA Agent step handler
+    def ba_step_handler(context):
+        """Execute BA Agent step"""
+        print("\n🔍 Executing BA Agent...")
+        
+        # BA Agent requires jira_config (can be empty dict for file-based requirements)
+        jira_config = {}
+        ba = BAAgent(llm_config, jira_config)
+        
+        # Read requirements
+        requirement_data = ba.read_requirement_file(requirements_file)
+        
+        # Analyze requirements (method signature: requirement_data, output_dir)
+        result = ba.analyze_requirements(
+            requirement_data=requirement_data,
+            output_dir=analysis_dir
+        )
+        
+        # Return structured output for next agent
+        return {
+            'status': 'completed',
+            'requirement_data': requirement_data,
+            'analysis': result,
+            'analysis_file': os.path.join(analysis_dir, 'requirements_structured.json')
+        }
+    
+    # Register Architect Agent step handler
+    def architect_step_handler(context):
+        """Execute Architect Agent step"""
+        print("\n🏗️  Executing Architect Agent...")
+        
+        architect = ArchitectAgent(llm_config)
+        
+        # Get BA result from context
+        ba_result = context.get('ba_result', {})
+        
+        if not ba_result:
+            print("⚠️  No BA Agent result found in context")
+            return {'status': 'skipped', 'reason': 'no_ba_result'}
+        
+        # Option 1: Use analysis file path
+        analysis_file = ba_result.get('analysis_file')
+        
+        # Option 2: Use analysis dict directly from context (commented out)
+        # analysis_dict = ba_result.get('analysis')
+        
+        # Design architecture
+        architecture = architect.design_system_architecture(
+            ba_analysis=analysis_file,  # or analysis_dict
+            output_dir=architecture_dir
+        )
+        
+        return {
+            'status': 'completed',
+            'architecture': architecture,
+            'architecture_file': os.path.join(architecture_dir, 'system_architecture.md'),
+            'structured_file': os.path.join(architecture_dir, 'architecture_structured.json')
+        }
+    
+    # Register handlers
+    orchestrator.register_step_handler('ba', ba_step_handler)
+    orchestrator.register_step_handler('architect', architect_step_handler)
+    
+    # Create workflow with BA → Architect steps
     workflow = orchestrator.create_workflow(
-        steps=steps,
+        steps=['ba', 'architect'],
         context={
-            'requirements_file': requirements_file,
-            'codebase_path': codebase_path
+            'project': 'Personal Portfolio System',
+            'requirements_file': requirements_file
         }
     )
     
-    result = orchestrator.execute_workflow(workflow, pause_between_steps=step_by_step)
-    
-    # Display summary
-    print(f"\n{'=' * 60}")
-    print("📊 WORKFLOW SUMMARY")
-    print("=" * 60)
-    print(f"Status: {result['status']}")
-    print(f"\nSteps Executed:")
-    
-    for stage in result['stages']:
-        status_emoji = {
-            'completed': '✅',
-            'failed': '❌',
-            'skipped': '⚠️'
-        }.get(stage['status'], '❓')
-        
-        print(f"  {status_emoji} {stage['name']}: {stage['status']}")
-        
-        if stage.get('result'):
-            for key, value in stage['result'].items():
-                if key != 'status' and key != 'patterns':
-                    print(f"     • {key}: {value}")
-    
-    if 'ba' in steps:
-        print(f"\n📁 Requirements Analysis: requirements/analysis/")
-    
-    if 'architect' in steps:
-        print(f"📁 Architecture Design: requirements/analysis/architecture_design.md")
-    
-    return 0 if result['status'] == 'completed' else 1
-
-if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(
-        description='AI-powered workflow with flexible step execution',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Run both BA and Architect (default)
-  python3 ai_workflow_orchestrated.py requirements/user_requirement.md
-  
-  # Run only BA Agent for review
-  python3 ai_workflow_orchestrated.py requirements/user_requirement.md --steps ba
-  
-  # Run full pipeline with pauses
-  python3 ai_workflow_orchestrated.py requirements/user_requirement.md --steps ba architect --step-by-step
-  
-  # Custom codebase path
-  python3 ai_workflow_orchestrated.py requirements/user_requirement.md --codebase backend/
-        """
+    # Execute workflow
+    print("\n")
+    result = orchestrator.execute_workflow(
+        workflow, 
+        pause_between_steps=False  # Set to True for step-by-step execution
     )
     
-    parser.add_argument('requirements_file', nargs='?',
-                       default='requirements/user_requirement.md',
-                       help='Requirements file to analyze')
-    parser.add_argument('--codebase', default='src',
-                       help='Codebase path to analyze (default: src)')
-    parser.add_argument('--steps', nargs='+', 
-                       choices=['ba', 'architect', 'qa', 'developer', 'senior_dev'],
-                       help='Workflow steps to execute (default: ba architect)')
-    parser.add_argument('--step-by-step', action='store_true',
-                       help='Pause between steps for review')
+    # Display results
+    print("\n" + "="*80)
+    print("📊 WORKFLOW SUMMARY")
+    print("="*80)
     
-    args = parser.parse_args()
+    for i, stage in enumerate(result['stages'], 1):
+        print(f"\n{i}. {stage['name']} ({stage['agent']})")
+        print(f"   Status: {stage['status']}")
+        
+        if stage['status'] == 'completed' and stage.get('result'):
+            stage_result = stage['result']
+            if stage['key'] == 'ba':
+                print(f"   Outputs:")
+                print(f"     - {analysis_dir}/requirements_analysis.md")
+                print(f"     - {analysis_dir}/requirements.feature")
+                print(f"     - {analysis_dir}/requirements_structured.json")
+            elif stage['key'] == 'architect':
+                print(f"   Outputs:")
+                print(f"     - {architecture_dir}/system_architecture.md")
+                print(f"     - {architecture_dir}/architecture_structured.json")
     
-    try:
-        sys.exit(main(
-            requirements_file=args.requirements_file,
-            codebase_path=args.codebase,
-            steps=args.steps,
-            step_by_step=args.step_by_step
-        ))
-    except KeyboardInterrupt:
-        print("\n⚠️  Interrupted")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    print("\n" + "="*80)
+    print("✅ Workflow completed successfully!")
+    print("="*80)
+    print("\n📁 Next Steps:")
+    print("   1. Review architecture: cat architecture/system_architecture.md")
+    print("   2. Run Senior Dev Agent for detailed design")
+    print("   3. Run Developer Agent for implementation")
+    print()
+
+if __name__ == '__main__':
+    main()
