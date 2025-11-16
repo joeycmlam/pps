@@ -18,6 +18,7 @@ sys.path.insert(0, aiteam_path)
 from agents.lead_orchestrator import LeadOrchestrator
 from agents.ba_agent import BAAgent
 from agents.architect_agent import ArchitectAgent
+from agents.tech_lead_agent import TechLeadAgent
 
 
 class PPSWorkflow:
@@ -27,6 +28,7 @@ class PPSWorkflow:
                  requirements_file: str,
                  analysis_dir: str = 'requirements/analysis',
                  architecture_dir: str = 'architecture',
+                 technical_dir: str = 'technical_structure',
                  llm_provider: str = 'github_copilot_cli',
                  llm_model: str = 'gpt-4o'):
         """
@@ -36,12 +38,14 @@ class PPSWorkflow:
             requirements_file: Path to requirements file
             analysis_dir: Directory for BA Agent outputs
             architecture_dir: Directory for Architect Agent outputs
+            technical_dir: Directory for Tech Lead Agent outputs
             llm_provider: LLM provider (github_copilot_cli, ollama)
             llm_model: Model name (gpt-4o, llama3.2, etc.)
         """
         self.requirements_file = requirements_file
         self.analysis_dir = analysis_dir
         self.architecture_dir = architecture_dir
+        self.technical_dir = technical_dir
         
         # LLM Configuration
         self.llm_config = {
@@ -63,11 +67,13 @@ class PPSWorkflow:
         """Create necessary output directories"""
         Path(self.analysis_dir).mkdir(parents=True, exist_ok=True)
         Path(self.architecture_dir).mkdir(parents=True, exist_ok=True)
+        Path(self.technical_dir).mkdir(parents=True, exist_ok=True)
         
     def _register_handlers(self):
         """Register all workflow step handlers"""
         self.orchestrator.register_step_handler('ba', self._ba_step_handler)
         self.orchestrator.register_step_handler('architect', self._architect_step_handler)
+        self.orchestrator.register_step_handler('tech_lead', self._tech_lead_step_handler)
         
     def _ba_step_handler(self, context: Dict) -> Dict:
         """
@@ -124,11 +130,19 @@ class PPSWorkflow:
         ba_result = context.get('ba_result', {})
         
         if not ba_result:
-            print("⚠️  No BA Agent result found in context")
-            return {'status': 'skipped', 'reason': 'no_ba_result'}
-        
-        # Use analysis file path
-        analysis_file = ba_result.get('analysis_file')
+            # Check if analysis file exists from a previous run
+            expected_analysis_file = os.path.join(self.analysis_dir, 'requirements_structured.json')
+            if os.path.exists(expected_analysis_file):
+                print(f"   ℹ️  Using existing BA analysis from: {expected_analysis_file}")
+                analysis_file = expected_analysis_file
+            else:
+                print("❌ No BA Agent result found in context and no existing analysis file")
+                print(f"   Expected file: {expected_analysis_file}")
+                print("   💡 Run BA step first: python ai_workflow_orchestrated.py --steps ba")
+                return {'status': 'skipped', 'reason': 'no_ba_result'}
+        else:
+            # Use analysis file path from BA result
+            analysis_file = ba_result.get('analysis_file')
         
         # Design architecture
         architecture = architect.design_system_architecture(
@@ -141,6 +155,76 @@ class PPSWorkflow:
             'architecture': architecture,
             'architecture_file': os.path.join(self.architecture_dir, 'system_architecture.md'),
             'structured_file': os.path.join(self.architecture_dir, 'architecture_structured.json')
+        }
+    
+    def _tech_lead_step_handler(self, context: Dict) -> Dict:
+        """
+        Execute Tech Lead Agent step
+        
+        Args:
+            context: Workflow context dictionary
+            
+        Returns:
+            Dict with status, technical structure results, and file paths
+        """
+        print("\n👨‍💻 Executing Tech Lead Agent...")
+        
+        tech_lead = TechLeadAgent(self.llm_config)
+        
+        # Get Architect result from context
+        architect_result = context.get('architect_result', {})
+        ba_result = context.get('ba_result', {})
+        
+        # Determine architecture file
+        if architect_result:
+            architecture_file = architect_result.get('structured_file')
+        else:
+            # Check if architecture file exists from previous run
+            architecture_file = os.path.join(self.architecture_dir, 'architecture_structured.json')
+            if not os.path.exists(architecture_file):
+                print("❌ No Architect result found in context and no existing architecture file")
+                print(f"   Expected file: {architecture_file}")
+                print("   💡 Run Architect step first: python ai_workflow_orchestrated.py --steps ba architect")
+                return {'status': 'skipped', 'reason': 'no_architect_result'}
+            print(f"   ℹ️  Using existing architecture from: {architecture_file}")
+        
+        # Determine BA analysis file
+        if ba_result:
+            ba_file = ba_result.get('analysis_file')
+        else:
+            # Check if BA analysis exists from previous run
+            ba_file = os.path.join(self.analysis_dir, 'requirements_structured.json')
+            if not os.path.exists(ba_file):
+                print("❌ No BA result found in context and no existing BA analysis file")
+                print(f"   Expected file: {ba_file}")
+                print("   💡 Run BA step first: python ai_workflow_orchestrated.py --steps ba")
+                return {'status': 'skipped', 'reason': 'no_ba_result'}
+            print(f"   ℹ️  Using existing BA analysis from: {ba_file}")
+        
+        # Design technical structure
+        technical_structure = tech_lead.design_technical_structure(
+            architecture_design=architecture_file,
+            ba_analysis=ba_file,
+            output_dir=self.technical_dir
+        )
+        
+        # Also generate task breakdown
+        tasks = tech_lead.breakdown_tasks(
+            architecture_design=architecture_file,
+            ba_analysis=ba_file,
+            output_dir=self.technical_dir
+        )
+        
+        return {
+            'status': 'completed',
+            'technical_structure': technical_structure,
+            'tasks': tasks,
+            'technical_structure_file': os.path.join(self.technical_dir, 'technical_structure.md'),
+            'tasks_file': os.path.join(self.technical_dir, 'development_tasks.md'),
+            'structured_files': {
+                'technical': os.path.join(self.technical_dir, 'technical_structure.json'),
+                'tasks': os.path.join(self.technical_dir, 'tasks_structured.json')
+            }
         }
     
     def run(self, 
@@ -196,6 +280,7 @@ class PPSWorkflow:
         step_names = {
             'ba': 'BA Agent: Analyze requirements',
             'architect': 'Architect Agent: Design system architecture',
+            'tech_lead': 'Tech Lead Agent: Create technical structure and tasks',
             'qa': 'QA Agent: Design test strategy',
             'senior_dev': 'Senior Dev Agent: Detailed design',
             'developer': 'Developer Agent: Implementation'
@@ -226,6 +311,12 @@ class PPSWorkflow:
                     print(f"   Outputs:")
                     print(f"     - {self.architecture_dir}/system_architecture.md")
                     print(f"     - {self.architecture_dir}/architecture_structured.json")
+                elif stage['key'] == 'tech_lead':
+                    print(f"   Outputs:")
+                    print(f"     - {self.technical_dir}/technical_structure.md")
+                    print(f"     - {self.technical_dir}/development_tasks.md")
+                    print(f"     - {self.technical_dir}/technical_structure.json")
+                    print(f"     - {self.technical_dir}/tasks_structured.json")
         
         print("\n" + "="*80)
         if result['status'] == 'completed':
@@ -239,9 +330,16 @@ class PPSWorkflow:
     def _print_next_steps(self):
         """Print suggested next steps"""
         print("\n📁 Next Steps:")
-        print(f"   1. Review architecture: cat {self.architecture_dir}/system_architecture.md")
-        print("   2. Run Senior Dev Agent for detailed design")
-        print("   3. Run Developer Agent for implementation")
+        if os.path.exists(os.path.join(self.technical_dir, 'technical_structure.md')):
+            print(f"   1. Review technical structure: cat {self.technical_dir}/technical_structure.md")
+            print(f"   2. Review development tasks: cat {self.technical_dir}/development_tasks.md")
+            print("   3. Run Developer Agent for implementation")
+        elif os.path.exists(os.path.join(self.architecture_dir, 'system_architecture.md')):
+            print(f"   1. Review architecture: cat {self.architecture_dir}/system_architecture.md")
+            print("   2. Run Tech Lead Agent: python ai_workflow_orchestrated.py --steps tech_lead")
+            print("   3. Run Developer Agent for implementation")
+        else:
+            print("   1. Run full workflow: python ai_workflow_orchestrated.py --steps ba architect tech_lead")
         print()
 
 
@@ -254,23 +352,26 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run full BA → Architect workflow (default)
+  # Run full BA → Architect → Tech Lead workflow
+  python ai_workflow_orchestrated.py --steps ba architect tech_lead
+  
+  # Run default BA → Architect workflow
   python ai_workflow_orchestrated.py
   
   # Run only BA Agent
   python ai_workflow_orchestrated.py --steps ba
   
-  # Run only Architect Agent (requires existing BA analysis)
-  python ai_workflow_orchestrated.py --steps architect
+  # Run only Tech Lead Agent (requires existing architecture and BA analysis)
+  python ai_workflow_orchestrated.py --steps tech_lead
   
   # Run with step-by-step confirmation
-  python ai_workflow_orchestrated.py --steps ba architect --pause
+  python ai_workflow_orchestrated.py --steps ba architect tech_lead --pause
   
   # Custom requirements file
   python ai_workflow_orchestrated.py --requirements requirements/custom.md
   
   # Custom output directories
-  python ai_workflow_orchestrated.py --analysis-dir output/analysis --arch-dir output/architecture
+  python ai_workflow_orchestrated.py --analysis-dir output/analysis --arch-dir output/architecture --tech-dir output/technical
   
   # Use different LLM
   python ai_workflow_orchestrated.py --llm-provider ollama --llm-model llama3.2
@@ -296,9 +397,15 @@ Examples:
     )
     
     parser.add_argument(
+        '--tech-dir',
+        default='/Users/joeylam/repo/pps/technical_structure',
+        help='Output directory for technical structure (default: technical_structure)'
+    )
+    
+    parser.add_argument(
         '--steps',
         nargs='+',
-        choices=['ba', 'architect', 'qa', 'senior_dev', 'developer'],
+        choices=['ba', 'architect', 'tech_lead', 'qa', 'senior_dev', 'developer'],
         default=['ba', 'architect'],
         help='Workflow steps to execute (default: ba architect)'
     )
@@ -335,6 +442,7 @@ Examples:
         requirements_file=args.requirements,
         analysis_dir=args.analysis_dir,
         architecture_dir=args.arch_dir,
+        technical_dir=args.tech_dir,
         llm_provider=args.llm_provider,
         llm_model=args.llm_model
     )
