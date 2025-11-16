@@ -85,8 +85,12 @@ class PPSWorkflow:
         jira_config = {}
         ba = BAAgent(self.llm_config, jira_config)
         
+        # Get requirements file from context (if provided) or use default
+        requirements_file = context.get('requirements_file', self.requirements_file)
+        print(f"   Reading requirements from: {requirements_file}")
+        
         # Read requirements
-        requirement_data = ba.read_requirement_file(self.requirements_file)
+        requirement_data = ba.read_requirement_file(requirements_file)
         
         # Analyze requirements
         result = ba.analyze_requirements(
